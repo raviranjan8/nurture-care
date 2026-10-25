@@ -1,9 +1,9 @@
 # 🛠️ Nurture Care — Implementation Design Document
 
-> **Version:** 1.0  
-> **Date:** October 20, 2026  
-> **Based on:** requirement.md v2.2  
-> **Stack:** Go (backend) · React + Vite (web) · React Native + Expo (mobile) · PostgreSQL + PostGIS · *(Redis optional — Phase 2+, behind interfaces)*  
+> **Version:** 1.2  
+> **Date:** October 25, 2026  
+> **Based on:** requirement.md v2.4  
+> **Stack:** Go (backend) · React + Vite (web) · React Native + Expo (mobile) · SQLite / PostgreSQL + PostGIS · *(Redis optional — Phase 2+, behind interfaces)*  
 > **Principles:** Simple · Modular · Extendable · Minimal infra (single 2 GB VPS)
 
 ---
@@ -311,22 +311,25 @@ Base: `/api/v1` · Auth: `Bearer JWT` · 🔓 = public
 | GET/PUT | `/agency/dispatch-config` | Initial radius, step, timeout, max radius |
 | GET | `/agency/services` | Catalogue with enabled flag & agency price |
 | PUT | `/agency/services/:serviceId` | Enable/disable, set price |
-| GET/POST | `/agency/packages` | List / create predefined packages |
-| PUT/DELETE | `/agency/packages/:id` | Edit / delete |
+| GET/POST | `/agency/packages` | List / create unified packages (`items` array with procedures, visits, unit prices, discount %) |
+| PUT/DELETE | `/agency/packages/:id` | Edit / delete unified package |
 | POST | `/agency/packages/:id/publish` | Publish/unpublish |
-| POST | `/agency/custom-packages` | Customer care builds custom package |
+| POST | `/agency/custom-packages` | Create customer-tagged custom package (unified modal with `customerId` and 14-day expiry) |
 | POST | `/agency/custom-packages/:id/send` | Send proposal (app/SMS/WhatsApp) |
 | POST | `/agency/custom-packages/:id/approve` | Manager approval (discount threshold) |
 | GET/POST | `/agency/discounts` · PUT/DELETE `/agency/discounts/:id` | Discounts & promo codes |
-| GET | `/agency/staff` | Staff list + live status |
-| POST | `/agency/staff/invite` | Invite staff |
-| PUT | `/agency/staff/:id` | Assign services, commission, suspend |
+| GET | `/agency/staff` | Staff list + live status + multi-select clinical categories |
+| POST | `/agency/staff/invite` | Invite staff (Step 1 Registration) |
+| POST | `/agency/staff/:id/verify` | **Step 2 Verification**: verify credentials and add audit comment |
+| POST | `/agency/staff/:id/enable` | **Step 3 Dispatch Enablement**: toggle staff live dispatch activation |
+| PUT | `/agency/staff/:id` | Assign clinical categories, commission, suspend |
 | GET | `/agency/bookings` | All bookings `?status=&date=` |
 | POST | `/agency/bookings/:id/accept` · `/decline` | Manual accept/decline |
-| POST | `/agency/bookings/:id/assign` | **Force-assign** staff |
+| PATCH | `/agency/bookings/:id` | Update booking status or **assign / reassign staff** (`assignedStaffId`) |
+| POST | `/agency/bookings/:id/assign` | **Force-assign** staff via Customer Care Desk modal |
 | POST | `/agency/bookings/:id/rebroadcast` | Re-broadcast with surge bonus |
 | GET | `/agency/dispatch/live` | Active dispatches (board snapshot) |
-| GET | `/agency/visits/:id/recording` | Recording + AI summary |
+| GET | `/agency/visits/:id/recording` | Read-only audit of recording + AI summary + vitals |
 | GET | `/agency/analytics/*` | `revenue`, `bookings`, `staff`, `packages`, `dispatch` |
 | GET | `/agency/finance/payouts` | Payouts & commission |
 | GET/POST | `/agency/tickets` | Support tickets |

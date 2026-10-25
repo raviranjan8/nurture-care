@@ -154,6 +154,7 @@ func InitDB(filepath string) (*sql.DB, error) {
 	_, _ = db.Exec("ALTER TABLE packages ADD COLUMN customer_id TEXT")
 	_, _ = db.Exec("ALTER TABLE packages ADD COLUMN expires_at DATETIME")
 	_, _ = db.Exec("ALTER TABLE packages ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
+	_, _ = db.Exec("ALTER TABLE packages ADD COLUMN items_json TEXT DEFAULT '[]'")
 	_, _ = db.Exec("ALTER TABLE bookings ADD COLUMN prescription_url TEXT")
 	_, _ = db.Exec("ALTER TABLE bookings ADD COLUMN prescription_name TEXT")
 	_, _ = db.Exec("ALTER TABLE bookings ADD COLUMN av_summary TEXT")
@@ -163,6 +164,9 @@ func InitDB(filepath string) (*sql.DB, error) {
 	_, _ = db.Exec("ALTER TABLE bookings ADD COLUMN booking_time TEXT DEFAULT 'ASAP'")
 	_, _ = db.Exec("ALTER TABLE bookings ADD COLUMN retry_count INTEGER DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE bookings ADD COLUMN declined_staff_ids TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN address TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN lat REAL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN lng REAL DEFAULT 0")
 	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS chat_messages (
 		id TEXT PRIMARY KEY,
 		booking_id TEXT NOT NULL,
@@ -172,6 +176,161 @@ func InitDB(filepath string) (*sql.DB, error) {
 		message TEXT NOT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS agency_services (
+		agency_id TEXT NOT NULL,
+		service_id TEXT NOT NULL,
+		is_enabled INTEGER DEFAULT 1,
+		custom_price INTEGER DEFAULT 0,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (agency_id, service_id)
+	)`)
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS package_items (
+		id TEXT PRIMARY KEY,
+		package_id TEXT NOT NULL,
+		service_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		visits INTEGER DEFAULT 1,
+		unit_price INTEGER DEFAULT 0
+	)`)
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS package_enrollments (
+		id TEXT PRIMARY KEY,
+		package_id TEXT NOT NULL,
+		package_name TEXT NOT NULL,
+		agency_id TEXT NOT NULL,
+		agency_name TEXT NOT NULL,
+		patient_name TEXT NOT NULL,
+		patient_phone TEXT NOT NULL,
+		total_visits INTEGER DEFAULT 1,
+		duration_days INTEGER DEFAULT 7,
+		price INTEGER NOT NULL,
+		status TEXT DEFAULT 'CONFIRMED',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS user_notifications (
+		id TEXT PRIMARY KEY,
+		contact TEXT NOT NULL,
+		type TEXT NOT NULL,
+		title TEXT NOT NULL,
+		message TEXT NOT NULL,
+		code TEXT DEFAULT '',
+		is_read INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+
+	// Paramedic Profile & 3-Step Verification/Enablement Schema Migrations
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN email TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN gender TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN qualification TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN specializations TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN license_no TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN id_proof_type TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN id_proof_no TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN police_verif_doc TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN service_area TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN languages TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN bio TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN verification_status TEXT DEFAULT 'PENDING'")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN verification_comment TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN verified_at DATETIME")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN is_enabled INTEGER DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN enabled_at DATETIME")
+	_, _ = db.Exec("ALTER TABLE staff ADD COLUMN photo_url TEXT DEFAULT ''")
+
+	// Update existing default verified staff to be verified and enabled
+	_, _ = db.Exec("UPDATE staff SET verification_status = 'VERIFIED', is_enabled = 1 WHERE status = 'VERIFIED' AND (verification_status IS NULL OR verification_status = 'PENDING')")
+
+	// Backfill complete profile attributes for default seeded staff if empty
+	_, _ = db.Exec(`
+		UPDATE staff
+		SET qualification = CASE 
+				WHEN qualification != '' THEN qualification
+				WHEN id = 'STF-101' THEN 'B.Sc Nursing, Critical Care (AIIMS New Delhi)'
+				WHEN id = 'STF-102' THEN 'B.P.T, Master in Sports & Neuro Rehabilitation'
+				WHEN id = 'STF-103' THEN 'Post-Basic B.Sc Nursing, Critical Care'
+				WHEN id = 'STF-104' THEN 'Diploma in Medical Laboratory Technology (DMLT)'
+				WHEN id = 'STF-105' THEN 'Certified Geriatric Caregiver & BLS Specialist'
+				WHEN id = 'STF-106' THEN 'B.Sc Nursing & Operation Theatre Technician'
+				ELSE 'Diploma in General Nursing and Midwifery (GNM)'
+			END,
+			license_no = CASE
+				WHEN license_no != '' THEN license_no
+				WHEN id = 'STF-101' THEN 'INC-DEL-RN-88492'
+				WHEN id = 'STF-102' THEN 'DCP-PT-2019-3321'
+				WHEN id = 'STF-103' THEN 'MNC-2017-77124'
+				WHEN id = 'STF-104' THEN 'MLT-2020-55912'
+				WHEN id = 'STF-105' THEN 'CGC-2021-11849'
+				WHEN id = 'STF-106' THEN 'TNC-2016-99214'
+				ELSE 'MNC-2022-44123'
+			END,
+			specializations = CASE
+				WHEN specializations != '' THEN specializations
+				WHEN id = 'STF-101' THEN 'IV Drip Setup, Wound Dressing, Catheterization, Vitals Monitoring'
+				WHEN id = 'STF-102' THEN 'Post-Knee/Hip Rehab, Gait Re-education, Stroke Mobility'
+				WHEN id = 'STF-103' THEN 'ICU Nursing, Tracheostomy Care, Bed Sore Care'
+				WHEN id = 'STF-104' THEN 'Venipuncture, Blood Sample Collection, Rapid Diagnostics'
+				WHEN id = 'STF-105' THEN 'Assisted Living, Elderly Mobility, Dementia Care'
+				WHEN id = 'STF-106' THEN 'Post-Operative Care, Suture Removal, Sterile Dressing'
+				ELSE 'General Clinical Care, Patient Hygiene, Vitals Recording'
+			END,
+			id_proof_type = CASE WHEN id_proof_type != '' THEN id_proof_type ELSE 'Aadhaar Card' END,
+			id_proof_no = CASE 
+				WHEN id_proof_no != '' THEN id_proof_no 
+				WHEN id = 'STF-101' THEN '5432-8765-4921'
+				WHEN id = 'STF-102' THEN '9876-1234-8842'
+				ELSE '4321-9876-7711'
+			END,
+			police_verif_doc = CASE 
+				WHEN police_verif_doc != '' THEN police_verif_doc 
+				WHEN id = 'STF-101' THEN 'POL-VERIF-2026-DEL-8921'
+				ELSE 'POL-VERIF-2026-MUM-4412'
+			END,
+			service_area = CASE 
+				WHEN service_area != '' THEN service_area
+				WHEN id = 'STF-101' THEN 'South Delhi, Green Park, Hauz Khas, Safdarjung Enclave'
+				WHEN id = 'STF-102' THEN 'South Delhi, Greater Kailash, Saket, Panchsheel Park'
+				WHEN id = 'STF-103' THEN 'Central Delhi, Connaught Place, Karol Bagh, Patel Nagar'
+				WHEN id = 'STF-104' THEN 'South Delhi, Malviya Nagar, Saket, Vasant Kunj'
+				WHEN id = 'STF-105' THEN 'West Delhi, Rajouri Garden, Punjabi Bagh, Janakpuri'
+				WHEN id = 'STF-106' THEN 'North Delhi, Civil Lines, Model Town, Pitampura'
+				ELSE 'South Delhi NCR'
+			END,
+			languages = CASE 
+				WHEN languages != '' THEN languages
+				ELSE 'English, Hindi'
+			END,
+			gender = CASE 
+				WHEN gender != '' THEN gender
+				WHEN id IN ('STF-101', 'STF-103', 'STF-106') THEN 'Female'
+				ELSE 'Male'
+			END,
+			email = CASE 
+				WHEN email != '' THEN email
+				WHEN id = 'STF-101' THEN 'pooja.sharma@lifecare.org'
+				WHEN id = 'STF-102' THEN 'rahul.verma@lifecare.org'
+				WHEN id = 'STF-103' THEN 'sunita.nair@lifecare.org'
+				ELSE 'staff@lifecare.org'
+			END,
+			bio = CASE
+				WHEN bio != '' THEN bio
+				ELSE 'Certified healthcare professional with extensive bedside experience in post-operative care, clinical monitoring, and home procedures.'
+			END,
+			verification_comment = CASE
+				WHEN verification_comment != '' THEN verification_comment
+				ELSE 'Clinical degrees, medical council licensing, and police background clearance audited and verified by LifeCare Agency Director.'
+			END,
+			role = CASE
+				WHEN id IN ('STF-101', 'STF-103', 'STF-106') AND (role LIKE '%Nurse%' OR role = 'Nursing') THEN 'Nursing, Elderly Care'
+				WHEN id = 'STF-102' AND (role LIKE '%Physio%' OR role = 'Physiotherapy') THEN 'Physiotherapy, Elderly Care'
+				WHEN id = 'STF-104' AND (role LIKE '%Phleb%' OR role = 'Lab & Diagnostics') THEN 'Lab & Diagnostics, Nursing'
+				WHEN id = 'STF-105' AND (role LIKE '%Caregiver%' OR role = 'Elderly Care') THEN 'Elderly Care'
+				WHEN id = 'STF-f655c9' THEN 'Nursing, Elderly Care'
+				WHEN role LIKE '%Nurse%' THEN 'Nursing'
+				WHEN role LIKE '%Physio%' THEN 'Physiotherapy'
+				WHEN role LIKE '%Phleb%' THEN 'Lab & Diagnostics'
+				WHEN role LIKE '%Caregiver%' THEN 'Elderly Care'
+				ELSE role
+			END
+	`)
 
 
 	// Seed Sample Data
@@ -213,8 +372,10 @@ func seedUsers(db *sql.DB) {
 		VALUES ('USR-004', 'paramedical', ?, 'PARAMEDIC', 'Pooja Sharma, RN', 'AG-01', 'STF-101', '+91 98765 43210')`, hash)
 
 	// 5. Customer / Patient (Mrs. Priya Sharma)
-	_, _ = db.Exec(`INSERT OR IGNORE INTO users (id, username, password_hash, role, name, agency_id, staff_id, phone)
-		VALUES ('USR-005', 'customer', ?, 'PATIENT', 'Priya Sharma (Patient)', NULL, NULL, '+91 98765 12345')`, hash)
+	_, _ = db.Exec(`INSERT OR IGNORE INTO users (id, username, password_hash, role, name, agency_id, staff_id, phone, address, lat, lng)
+		VALUES ('USR-005', 'customer', ?, 'PATIENT', 'Priya Sharma (Patient)', NULL, NULL, '+91 98765 12345', 'Flat 402, Green Glen Layout, Bellandur, Bengaluru', 28.5670, 77.2140)`, hash)
+	// Ensure seeded customer has address if user already existed
+	_, _ = db.Exec(`UPDATE users SET address = 'Flat 402, Green Glen Layout, Bellandur, Bengaluru', lat = 28.5670, lng = 77.2140 WHERE id = 'USR-005' AND (address IS NULL OR address = '')`)
 
 	log.Printf("Default multi-role users seeded: admin, agency, care, paramedical, customer (Password: 12345)")
 }
@@ -373,6 +534,11 @@ func seedSampleBookings(db *sql.DB) {
 			"BK-9003", "PHY-001", "AG-01", "Rajiv Khanna", "+91 98111 22334", "C-12 Hauz Khas Enclave, New Delhi",
 			28.5490, 77.2010, "SEARCHING", "",
 			"Post-knee rehab session requested for evening visit.", "", "", "",
+		},
+		{
+			"BK-9004", "NUR-001", "AG-01", "Sunil Verma", "+91 98100 44556", "B-44 Greater Kailash 1, New Delhi",
+			28.5520, 77.2340, "SEARCHING", "",
+			"Post-operative vitals check and wound dressing requested. Urgent morning visit.", "", "", "",
 		},
 	}
 

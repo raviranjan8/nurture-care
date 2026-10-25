@@ -1,13 +1,15 @@
 # 🏥 Home Care with Paramedical Staff — Requirement Document
 
-> **Version:** 2.2  
-> **Date:** October 20, 2026  
+> **Version:** 2.4  
+> **Date:** October 25, 2026  
 > **Prepared by:** Ravi Ranjan  
-> **Status:** Draft — Awaiting Review  
+> **Status:** Active Reference & Specification  
 > **Change Log:**  
 > - v2.0 — Added Multi-Agency Marketplace Model  
 > - v2.1 — Added Individual Service Listings, Enhanced Package System with Discounting, Live Visit Broadcasting, AI-Powered Visit Intelligence & OCR  
-> - v2.2 — Added Automated Booking Confirmation & Dynamic Multi-Stage Radius Broadcast Dispatch (5km Initial + 5km Staged Expansion, First-to-Accept Atomic Lock, Instant Customer Notification)
+> - v2.2 — Added Automated Booking Confirmation & Dynamic Multi-Stage Radius Broadcast Dispatch (5km Initial + 5km Staged Expansion, First-to-Accept Atomic Lock, Instant Customer Notification)  
+> - v2.3 — Added Multi-Select Clinical Categories across catalogue & staff, 3-Step Paramedical Verification & Dispatch Enablement Lifecycle, Unified Package Builder with Procedure Inclusions, and Agency Customer Care Manual Staff Assignment Modal  
+> - v2.4 — Added Passwordless OTP Authentication (SMS/Email simulation with SSE real-time notification broker & SQLite persistence), Inline Modal OTP Banners with 1-Click Auto-Fill, Auto-Derived Package Categories from Selected Services, and Strict Customer Isolation for Enrolled Packages & Booking History
 
 ---
 
@@ -321,37 +323,38 @@ Each individual service gets its own dedicated listing page containing:
 | AG-078 | **Discount validity period** — set start/end dates for any discount or offer | Medium |
 | AG-079 | **Minimum order value** for discount applicability | Low |
 
-#### 6.1.5 On-Demand Custom Package Builder (Customer Care)
+#### 6.1.5 Unified Package Creation & Custom Care Plan Engine
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| AG-080 | **Customer care can create custom packages on-the-fly** based on a specific patient's needs | High |
-| AG-081 | Custom package builder: pick individual services from catalogue, set visit count, duration, and schedule | High |
-| AG-082 | **Apply custom discount** on the on-demand package to make it attractive (flat, percentage, or negotiated price) | High |
-| AG-083 | Add special notes / care instructions to the custom package | Medium |
-| AG-084 | **Send custom package proposal** to patient for review and acceptance (via app notification, SMS, or WhatsApp) | High |
-| AG-085 | Patient can accept, request modification, or decline the custom package | High |
-| AG-086 | Track all custom packages created — with patient details, discount applied, and status | High |
-| AG-087 | **Convert popular custom packages into predefined templates** for future reuse | Medium |
-| AG-088 | Approval workflow: custom packages above a discount threshold require manager approval | Medium |
-| AG-089 | Price comparison display: show individual service total vs custom package price with savings highlighted | High |
+| AG-080 | **Single, Unified Package Creation Experience**: One consistent package creation flow and modal used across both Agency Administration and Customer Care Desk | High |
+| AG-081 | **Target Scope Selection**: Switch seamlessly between **Public Agency Package** (visible across marketplace) and **Customer-Specific Package** (tagged to a patient ID with 14-day auto-expiry) | High |
+| AG-082 | **Auto-Derived Package Categories & Category-Filtered Procedure Picker**: Package clinical categories are automatically derived and updated in a text field based on the included services. Services can be filtered with 1-click quick-category tabs (`All`, `Nursing`, `Physiotherapy`, `Elderly Care`, `Lab & Diagnostics`) with session counts | High |
+| AG-083 | **Individual Procedure Picker**: Search and add specific procedures from the active service catalogue with customizable session/visit counts | High |
+| AG-084 | **Itemized Cost & Retail Sum**: Automatically compute the total retail price as $\sum (\text{unit price} \times \text{sessions})$ and display an itemized procedures table | High |
+| AG-085 | **Interactive Package Discount Engine**: Real-time slider and numeric input for package discount (0–90%), calculating net offered price and highlighting patient savings (e.g., "Save ₹2,000") | High |
+| AG-086 | **Auto-Calculated Totals**: Persist aggregated session counts, duration (days), final package price, original price, discount percentage, and itemized procedure JSON | High |
+| AG-087 | **Customer Expiry & Notification**: Customer-tagged packages notify the patient, display exclusively in their portal, and auto-expire after 14 days if unpurchased | High |
 
-#### 6.1.6 Staff Management (Agency-Level)
+#### 6.1.6 Staff Management & 3-Step Verification Lifecycle
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| AG-030 | Add/invite staff members to the agency's pool | High |
-| AG-031 | Manage staff verification at agency level (platform verification also applies) | High |
-| AG-032 | Assign staff to specific service categories and **individual services** | High |
-| AG-033 | View staff availability, live GPS locations, and auto-dispatch status | High |
-| AG-034 | Set staff commission/payout structure at agency level | High |
-| AG-035 | Monitor staff performance (ratings, on-time %, completion rate, broadcast accept rate) | High |
-| AG-036 | Suspend or remove staff from agency pool | Medium |
+| AG-030 | **Step 1: Paramedical Registration / Onboarding**: Add/invite staff to agency roster. Captures credentials, license number, Aadhaar/ID proof, police verification doc, service area, and multi-select clinical categories | High |
+| AG-031 | **Multi-Select Clinical Categories for Staff**: Staff can specify multiple clinical qualifications (e.g., `'Nursing, Physiotherapy'`) enabling dispatch eligibility across multiple care categories | High |
+| AG-032 | **Step 2: Credential Verification**: Agency admin verifies uploaded clinical licenses and background documents, recording an audit note and setting status to `VERIFIED` | High |
+| AG-033 | **Step 3: Dispatch Enablement**: Explicit toggle to enable/disable staff for live dispatch. System strictly prevents enabling unverified staff | High |
+| AG-034 | View staff availability, live GPS locations, and auto-dispatch status | High |
+| AG-035 | Set staff commission/payout structure at agency level | High |
+| AG-036 | Monitor staff performance (ratings, on-time %, completion rate, broadcast accept rate) | High |
+| AG-037 | Suspend or remove staff from agency pool | Medium |
 | AG-037 | Staff can belong to multiple agencies (if allowed by agency settings) | Medium |
 
 #### 6.1.7 Booking & Request Management & Automated Dispatch Configuration
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | AG-040 | View all incoming booking requests (from marketplace or white-label) | High |
-| AG-041 | Accept, decline, or reassign booking requests manually if needed | High |
+| AG-041 | Accept, decline, or cancel booking requests with automated replacement routing | High |
+| AG-041b | **Customer Care Desk Staff Assignment Modal**: Dedicated assignment & reassignment interface on care queue. Displays verified on-duty agency staff, real-time distance in km, ratings, clinical categories, and 1-tap instant assignment | High |
+| AG-041c | **Role Separation for Vitals Entry vs Care Oversight**: Vital sign recording (BP, SpO2, Pulse) and clinical sign-off is restricted strictly to on-duty paramedics. Agency Care Coordinators and Admins view read-only audit records and consultation transcripts | High |
 | AG-042 | Dashboard view: live dispatching, upcoming, ongoing, completed, unassigned/escalated | High |
 | AG-043 | Manage cancellations and rescheduling for agency bookings | High |
 | AG-044 | **Enable/Configure Automated Booking Dispatch**: toggle auto-dispatch on/off per service category | High |
@@ -422,6 +425,7 @@ Each individual service gets its own dedicated listing page containing:
 | P-029b | **Dynamic Radius Expansion Status**: if expanding beyond 5 km, radar updates smoothly: "Widening search to 10 km to find the best available caregiver..." | High |
 | P-029c | **Instant Caregiver Confirmed Screen**: as soon as a staff member accepts, the screen transitions to "Caregiver Confirmed! 🎉" with full profile (photo, name, qualification, rating, contact) | High |
 | P-029d | **Immediate Multichannel Confirmation**: instant push notification, SMS, and WhatsApp message sent with confirmation details and caregiver credentials | High |
+| P-029e | **Customer Contact & OTP Verification before Booking & Enrollment**: Patient specifies phone number or email and must verify a 6-digit OTP before single-session booking or multi-day package enrollment confirmation is dispatched. | High |
 
 #### 6.2.3 Service Discovery & Booking (White-Label Mode)
 | ID | Requirement | Priority |

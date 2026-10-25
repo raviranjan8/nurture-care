@@ -2,6 +2,11 @@
 
 This document provides essential architectural context, technical specifications, and development guidelines for developers and AI agents working on the **Nurture Care** platform.
 
+> [!CAUTION]
+> ### STRICT INSTRUCTION FOR AGENTS: NO AUTOMATED BROWSER / DOM CHECKS
+> **DO NOT** launch automated browser subagents (`browser_subagent`) or perform automated DOM inspection / UI automation scripts autonomously.
+> **ALWAYS ask the user for explicit permission** before running any browser subagent, opening browser pages, or doing DOM checks. Verify frontend/backend logic using direct API requests (e.g. Node scripts, curl, PowerShell), test suites, or by letting the user interact directly with the running dev server in their browser.
+
 ---
 
 ## 1. Project Overview
@@ -137,6 +142,14 @@ The database automatically seeds 5 distinct role profiles with password `12345`:
 | **Care Coordinator** | `care` | `12345` | LifeCare Care Coordinator | LifeCare Home Health (`AG-01`), custom client package builder |
 | **Paramedic Staff** | `paramedical` | `12345` | Pooja Sharma, RN | Staff `STF-101`, mobile simulation, active visits, vitals entry |
 | **Patient / Family** | `customer` | `12345` | Priya Sharma | Patient `USR-005`, marketplace booking, live tracking, chat |
+| **New Customer (OTP)** | Any valid phone/email | Dynamic 6-digit OTP | Customer (`<contact>`) | Auto-provisioned `PATIENT`, passwordless login, unique OTP per contact, scoped bookings/packages |
+
+### Customer Passwordless OTP Flow
+- **Request OTP**: `POST /api/v1/auth/otp/request` with `{ "contact": "+91 9999999999" }`. Generates a unique 6-digit random code, broadcasts live via SSE (`/api/v1/notifications/stream`), and records in `user_notifications`.
+- **Verify & Auto-Provision**: `POST /api/v1/auth/otp/verify` with `{ "contact": "...", "code": "..." }`. Validates the dynamic code against the latest record. Returns JWT access token and user session (auto-creates `PATIENT` record if first login).
+- **Inline Notification Banners**: Both the Booking and Package Enrollment modals show an inline visual notification banner with the dispatched OTP and 1-click Auto-Fill.
+- **Strict Data Scoping**: `/api/v1/package-enrollments?role=PATIENT&patientPhone=...` ensures new customers see an isolated dashboard without leaking other accounts' records.
+
 
 ---
 
@@ -152,24 +165,29 @@ All backend endpoints are prefixed with `/api/v1`.
 > No auth middleware exists yet — the JWT is issued but never verified, and the web app does not send it. All routes below are effectively public.
 
 ### Catalogs & Packages
-- `GET /api/v1/services?agencyId=` / `POST /api/v1/services` / `PUT /api/v1/services/:id`: Master services and agency-specific services with discounts.
-- `GET /api/v1/packages?agencyId=&forCustomer=&all=`: List packages (supports custom packages filtered by `customerId`).
-- `POST /api/v1/packages` / `PUT /api/v1/packages/:id`: Create/edit packages with `customerId` association.
+- `GET /api/v1/services?agencyId=&customerView=`: Master services and agency-specific services (filtered by agency enablement and custom prices).
+- `POST /api/v1/services` / `PUT /api/v1/services/:id`: Create/edit master services or procedures.
+- `POST /api/v1/agencies/:id/services`: Toggle agency service enablement and set custom pricing overrides.
+- `GET /api/v1/packages?agencyId=&forCustomer=&all=`: List packages (supports both public agency packages and custom packages tagged to `customerId`).
+- `POST /api/v1/packages` / `PUT /api/v1/packages/:id`: Create/edit packages with unified service inclusions (`items` array: `serviceId`, `serviceName`, `visits`, `unitPrice`), auto-calculated totals, bundle discount %, and optional `customerId`.
 
 ### Agencies & Super-Admin
 - `GET /api/v1/agencies` / `POST /api/v1/agencies` / `PUT /api/v1/agencies/:id`
 - `GET /api/v1/agency-alerts?agencyId=` / `POST /api/v1/agency-alerts`
 - `GET /api/v1/admin/metrics`
 
-### Staff
-- `GET /api/v1/staff?agencyId=` / `POST /api/v1/staff` / `PUT /api/v1/staff/:id`
-- `PATCH /api/v1/staff/:id/duty`: Toggle staff on-duty / off-duty status.
+### Staff (Paramedical Lifecycle & Dispatch)
+- `GET /api/v1/staff?agencyId=` / `POST /api/v1/staff` / `PUT /api/v1/staff/:id`: Staff CRUD supporting multi-select **Clinical Categories** (e.g., `'Nursing, Physiotherapy'`).
+- `PATCH /api/v1/staff/:id/duty`: Toggle staff on-duty / off-duty status (`online`).
+- `POST /api/v1/staff/:id/verify`: **Step 2 Verification** (`status: 'VERIFIED' | 'REJECTED'`, `comment: string`).
+- `POST /api/v1/staff/:id/enable`: **Step 3 Dispatch Enablement** (`enable: boolean`). Requires staff profile to be `VERIFIED` before it can be enabled for live dispatch.
 
-### Bookings, Dispatch & Cancellation
+### Bookings, Dispatch & Staff Assignment
 - `GET /api/v1/bookings?staffId=&patientPhone=&agencyId=`
 - `GET /api/v1/bookings/:id`
 - `POST /api/v1/bookings`: Create booking (`SEARCHING`) storing `bookingTime`, default 5.0 km radius, and triggering `runStagedDispatch`.
-- `PATCH /api/v1/bookings/:id`: Update status, notes, vitals, prescription, AV fields.
+- `PATCH /api/v1/bookings/:id`: Update status, notes, vitals, prescription, AV fields, and `assignedStaffId` (used by Agency Customer Care for manual staff assignment/reassignment).
+- `POST /api/v1/bookings/:id/accept`: **Paramedic One-Click Claim** (`staffId`): Paramedic claims an open/escalated request matching their area and clinical category. Atomically locks and updates booking to `CONFIRMED`.
 - `POST /api/v1/bookings/:id/cancel`:
   - `cancelledBy: 'CUSTOMER'`: Cancels booking immediately (`CANCELLED`).
   - `cancelledBy: 'STAFF'`: Tracks declined staff ID and increments `retry_count`.
@@ -184,18 +202,33 @@ All backend endpoints are prefixed with `/api/v1`.
 
 ## 7. Key Business Logic & Algorithms
 
-### 1. Staged Dispatch & Multi-Cancellation Search
+### 1. Paramedical Staff 3-Step Onboarding & Dispatch Lifecycle
+1. **Step 1: Onboard / Register (`POST /staff`)**: Onboarded in `PENDING` verification status with `is_enabled = 0`. Supports multi-select clinical categories (`Nursing`, `Physiotherapy`, `Elderly Care`, `Lab & Diagnostics`).
+2. **Step 2: Credential Verification (`POST /staff/:id/verify`)**: Agency admin reviews licenses, police verification, and credentials, marking the staff `VERIFIED` with an audit comment.
+3. **Step 3: Live Dispatch Enablement (`POST /staff/:id/enable`)**: Profile is activated for live matching and dispatch routing. Only verified and enabled staff can receive automated broadcasts or claim visits.
+
+### 2. Unified Package Creation & Pricing Engine
+- Single, shared package creation experience across Agency Admin and Customer Care (`showAddModal === 'package'`).
+- **Dynamic Inclusions**: Supports picking individual procedures from the catalogue, setting custom visit/session counts, and automatically calculating the retail subtotal.
+- **Bundle Discount**: Dynamic % discount slider calculates the net package price and highlights patient savings.
+- **Dual Target Scope**: Can be published as a **Public Agency Package** (visible to all customers) or tagged to a specific **Customer/Patient** (with 14-day auto-expiry notice).
+
+### 3. Agency Care Staff Assignment vs. Paramedic Vitals Logging
+- **Agency Customer Care Desk**: Provides direct **"Assign Staff" / "Reassign Staff"** modal for open, pending, or escalated visits. Displays eligible on-duty staff sorted with real-time distance (km) and category matching.
+- **Paramedic Visit Execution**: Paramedics have exclusive access to the **Vitals Logging form** (BP, $\text{SpO}_2$, Pulse, clinical observations) and visit sign-off. Agency Care and Admin users see a read-only audit log of completed visit notes and AV consultation transcripts.
+
+### 4. Staged Dispatch & Multi-Cancellation Search
 Located in `runStagedDispatch` / `findEligibleStaffWithFilter` / `confirmBookingAtomic` in `backend/main.go`:
 1. `POST /bookings` inserts the booking as `SEARCHING` with `search_radius_km = 5.0` and specified `booking_time`.
-2. Scans `online = 1` staff matching agency and role (excluding busy staff on active bookings and previously declined staff).
+2. Scans `online = 1` staff matching agency and clinical category (excluding busy staff on active bookings and previously declined staff).
 3. Closest eligible staff within 5.0 km is assigned.
 4. If none found, expands to 10.0 km. If still none found, marks `ESCALATED`.
 5. Upon staff cancellation (`POST /bookings/:id/cancel`), up to 3 automated search iterations find the next available caregiver. On the 3rd staff cancellation, the booking is permanently cancelled.
 
-### 2. Booking Status Values
+### 5. Booking Status Values
 ```
-SEARCHING ──► CONFIRMED ──► EN_ROUTE ──► REACHED ──► COMPLETED
-    ├──► ESCALATED
+SEARCHING ──► CONFIRMED (Staff Assigned) ──► EN_ROUTE (Visit Started) ──► REACHED (Arrived) ──► COMPLETED
+    ├──► ESCALATED (Unassigned / Out of Range)
     └──► CANCELLED (By customer or after 3 consecutive staff declines)
 ```
 Transitions are set by the web app via `PATCH /bookings/:id`; the backend does not validate them.
